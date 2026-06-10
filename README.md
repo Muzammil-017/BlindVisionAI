@@ -105,20 +105,6 @@ Files that currently reference the backend URL:
 - `frontend_flutter/lib/main.dart`
 - `frontend_flutter/lib/services/detection_service.dart`
 
-## GitHub About
-
-Suggested repository description:
-
-```text
-Assistive Flutter and YOLOv5 object-detection app for visually impaired users, with Flask backend and text-to-speech feedback.
-```
-
-Suggested topics:
-
-```text
-flutter, dart, flask, python, yolov5, pytorch, object-detection, assistive-technology, accessibility, text-to-speech
-```
-
 ## Notes
 
 - Camera and microphone permissions are requested by the Flutter app.
