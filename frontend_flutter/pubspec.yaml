@@ -31,7 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   camera: ^0.10.5+2
-  http: ^0.13.6
+  http: ^1.2.1
   path_provider: ^2.1.1
   path: ^1.8.3
   flutter_tts: ^3.6.3   # Optional: for audio on frontend

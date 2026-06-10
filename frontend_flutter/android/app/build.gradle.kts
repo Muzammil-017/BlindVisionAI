@@ -23,7 +23,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.object_detection_app"
-        minSdk = 21 // ✅ Ensured explicit minSdk
+        minSdk = flutter.minSdkVersion // ✅ Ensured explicit minSdk
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

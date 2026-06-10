@@ -81,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -91,7 +92,8 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   CameraController? _controller;
   bool _isCameraInitialized = false;
-  List<String> detectedObjects = [];
+  bool _isDetecting = false;
+  List<dynamic> detections = [];
   final FlutterTts flutterTts = FlutterTts();
   Timer? autoDetectTimer;
 
@@ -104,36 +106,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _initCamera() async {
     var statuses = await [Permission.camera, Permission.microphone].request();
     if (statuses[Permission.camera]!.isGranted && statuses[Permission.microphone]!.isGranted) {
-      _controller = CameraController(cameras[0], ResolutionPreset.high);
+      _controller = CameraController(cameras[0], ResolutionPreset.low, enableAudio: false);
       await _controller!.initialize();
       setState(() => _isCameraInitialized = true);
-      autoDetectTimer = Timer.periodic(Duration(seconds: 3), (timer) => _detectObjects());
+      autoDetectTimer = Timer.periodic(
+        Duration(seconds: 6),
+        (timer) => _detectObjects(),
+      );
     }
   }
 
   Future<void> _detectObjects() async {
+  if (_isDetecting) return;
+  if (_controller == null || !_controller!.value.isInitialized) return;
+
+  _isDetecting = true;
+
+  try {
     final tempDir = await getTemporaryDirectory();
     final file = File('${tempDir.path}/object.jpg');
 
     XFile picture = await _controller!.takePicture();
     await picture.saveTo(file.path);
 
-    var uri = Uri.parse("http://192.168.43.119:5000/detect");
+    var uri = Uri.parse("http://10.125.118.142:8000/detect");
+
     var request = http.MultipartRequest('POST', uri);
     request.files.add(await http.MultipartFile.fromPath('image', file.path));
 
     var response = await request.send();
 
     if (response.statusCode == 200) {
-      var responseBody = await response.stream.bytesToString();
-      var data = jsonDecode(responseBody);
-      List detected = data['detected_objects'];
-      setState(() => detectedObjects = List<String>.from(detected));
-      if (detectedObjects.isNotEmpty) {
-        await flutterTts.speak("Detected: ${detectedObjects.join(', ')}");
+      final responseBody = await response.stream.bytesToString();
+      final List data = jsonDecode(responseBody);
+
+      setState(() {
+        detections = data;
+      });
+
+      if (detections.isNotEmpty) {
+        final names = detections
+            .map<String>((det) => det['name'].toString())
+            .toSet()
+            .toList();
+
+        await flutterTts.speak("Detected ${names.join(', ')}");
       }
+    } else {
+      print("Backend error: ${response.statusCode}");
     }
+  } catch (e) {
+    print("Detection error: $e");
+  } finally {
+    _isDetecting = false;
   }
+}
+
 
   @override
   void dispose() {
@@ -142,6 +170,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
+Widget buildCameraPreview() {
+  if (_controller == null || !_controller!.value.isInitialized) {
+    return const SizedBox();
+  }
+
+  return Center(
+    child: AspectRatio(
+      aspectRatio: _controller!.value.aspectRatio,
+      child: CameraPreview(_controller!),
+    ),
+  );
+}
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -155,8 +195,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 color: Colors.black,
               ),
               child: _isCameraInitialized && _controller != null
-                  ? CameraPreview(_controller!)
-                  : Center(child: CircularProgressIndicator()),
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    buildCameraPreview(),
+                    CustomPaint(
+                      painter: BoundingBoxPainter(
+                        detections: detections,
+                        imageSize: Size(
+                          _controller!.value.previewSize!.height,
+                          _controller!.value.previewSize!.width,
+                        ),
+                        screenSize: MediaQuery.of(context).size,
+                      ),
+                    ),
+                  ],
+                )
+              : const Center(child: CircularProgressIndicator()),
             ),
           ),
           Expanded(
@@ -170,7 +225,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   SizedBox(height: 10),
                   Expanded(
                     child: ListView(
-                      children: detectedObjects.map((obj) => detectionTile("$obj detected", Colors.green)).toList(),
+                      children: detections
+                        .map((det) =>
+                            detectionTile("${det['name']} detected", Colors.green))
+                        .toList(),
                     ),
                   ),
                 ],
@@ -182,6 +240,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  
   Widget detectionTile(String title, Color dotColor) {
     return Card(
       color: Color(0xFF2C2C2E),
@@ -212,4 +271,60 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(child: Text('Profile Screen')); // Placeholder
   }
+}
+
+class BoundingBoxPainter extends CustomPainter {
+  final List<dynamic> detections;
+  final Size imageSize;
+  final Size screenSize;
+
+  BoundingBoxPainter({
+    required this.detections,
+    required this.imageSize,
+    required this.screenSize,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.greenAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+
+    final textPainter = TextPainter(
+      textAlign: TextAlign.left,
+      textDirection: TextDirection.ltr,
+    );
+
+    for (var det in detections) {
+      double xScale = screenSize.width / imageSize.width;
+      double yScale = screenSize.height / imageSize.height;
+
+      double left = det['xmin'] * xScale;
+      double top = det['ymin'] * yScale;
+      double right = det['xmax'] * xScale;
+      double bottom = det['ymax'] * yScale;
+
+      final rect = Rect.fromLTRB(left, top, right, bottom);
+      canvas.drawRect(rect, paint);
+
+      final label =
+          "${det['name']} ${(det['confidence'] * 100).toStringAsFixed(1)}%";
+
+      textPainter.text = TextSpan(
+        text: label,
+        style: TextStyle(
+          color: Colors.greenAccent,
+          fontSize: 14,
+          backgroundColor: Colors.black54,
+        ),
+      );
+
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(left, top - 20));
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => true;
 }
